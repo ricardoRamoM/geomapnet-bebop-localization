@@ -1,0 +1,34 @@
+MAPNET TRAINING ANALYSIS
+=================================================================
+
+Experiment: Bebop_bebop_mapnet_bebop_mapnet_wd1e-4_100
+Log: /data/research/mapnet/geomapnet/scripts/logs/Bebop_bebop_mapnet_bebop_mapnet_wd1e-4_100/log.txt
+Training directory: /data/research/mapnet/geomapnet/scripts/logs/Bebop_bebop_mapnet_bebop_mapnet_wd1e-4_100
+Validation epochs: 14
+First validation epoch: 0
+Last validation epoch: 13
+
+Best validation epoch: 12
+Best validation loss: 1.50263300
+
+TOP 10 VALIDATION EPOCHS
+-----------------------------------------------------------------
+ 1. Epoch   12 | val_loss: 1.50263300
+ 2. Epoch   13 | val_loss: 1.54546200
+ 3. Epoch   11 | val_loss: 1.60553600
+ 4. Epoch    9 | val_loss: 1.68036900
+ 5. Epoch    8 | val_loss: 1.68068500
+ 6. Epoch   10 | val_loss: 1.68867200
+ 7. Epoch    7 | val_loss: 1.71533500
+ 8. Epoch    6 | val_loss: 1.75780800
+ 9. Epoch    5 | val_loss: 1.87216900
+10. Epoch    4 | val_loss: 1.99441800
+
+Available checkpoints: 4
+Checkpoint status: nearest
+
+Checkpoint: /data/research/mapnet/geomapnet/scripts/logs/Bebop_bebop_mapnet_bebop_mapnet_wd1e-4_100/epoch_010.pth.tar
+Checkpoint epoch: 10
+Size: 255.99 MB
+
+ADVERTENCIA: no existe un checkpoint identificado con la mejor época. Los mostrados son los más cercanos por número de época; no se puede afirmar que sean los mejores pesos.

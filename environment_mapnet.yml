@@ -1,0 +1,20 @@
+name: mapnet-py311
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch=2.4.*
+  - torchvision=0.19.*
+  - pytorch-cuda=12.1
+  - numpy=1.26.*
+  - scipy
+  - matplotlib
+  - pillow
+  - configparser
+  - pip
+  - pip:
+      - setuptools<80
+      - transforms3d
+      # visdom se instala DESPUÉS con --no-build-isolation (ver Paso C)

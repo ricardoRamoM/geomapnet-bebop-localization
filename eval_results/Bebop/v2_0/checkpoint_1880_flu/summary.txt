@@ -1,0 +1,15 @@
+EVALUACIÓN MAPNET - FLU
+==================================================
+Archivo: /data/research/mapnet/eval_results/test_epoch_1880/Bebop_bebop_mapnet.pkl
+Imágenes evaluadas: 284
+
+ERROR DE POSICIÓN
+Media:   0.606722 m
+Mediana: 0.513565 m
+RMSE:    0.778798 m
+P95:     1.565193 m
+
+ERROR DE ORIENTACIÓN
+Media:   14.334681 grados
+Mediana: 8.514150 grados
+P95:     55.507739 grados

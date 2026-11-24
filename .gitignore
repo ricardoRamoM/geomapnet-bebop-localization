@@ -1,0 +1,114 @@
+cat > .gitignore <<'EOF'
+# ============================================================
+# DATASETS AND RAW DATA
+# ============================================================
+
+7scenes_data/
+bebop_data/
+bebop_raw/
+bebeop_raw/
+
+*.zip
+*.bag
+*.db3
+*.mcap
+
+**/frames/
+**/frames_all/
+**/seq-*/
+**/color.png
+**/depth.png
+
+# Dataset symlinks and external data
+geomapnet/data/Bebop/
+geomapnet/data/deepslam_data/7Scenes
+geomapnet/data/deepslam_data/Bebop
+geomapnet/data/deepslam_data/RobotCar
+
+# ============================================================
+# CHECKPOINTS AND MODEL WEIGHTS
+# ============================================================
+
+checkpoints/
+**/checkpoints/
+
+*.pth
+*.pth.tar
+*.pt
+*.ckpt
+*.onnx
+
+# ============================================================
+# EXPERIMENTS AND GENERATED OUTPUTS
+# ============================================================
+
+experiments/
+results/
+geomapnet/results/
+
+*.pkl
+*.log
+*.tmp
+
+# Keep selected PNG, CSV and TXT summaries in eval_results/
+
+# ============================================================
+# LOGS AND LOCAL DIAGNOSTICS
+# ============================================================
+
+logs/
+**/logs/
+src/setup/diagnostics/
+geomapnet/scripts/logs
+
+# ============================================================
+# PYTHON
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ============================================================
+# ENVIRONMENTS AND LOCAL CONFIGURATION
+# ============================================================
+
+.venv/
+venv/
+env/
+conda/
+envs/
+.env
+.env.*
+
+# ============================================================
+# IDE AND EDITORS
+# ============================================================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# OPERATING SYSTEM
+# ============================================================
+
+.DS_Store
+Thumbs.db
+EOF
+# Additional external dataset symlinks
+geomapnet/data/RobotCar/
+data/deepslam_data/Bebop/
+
+# Local filesystem structure documentation (review before publishing)
+ESTRUCTURA.md
+geomapnet/ESTRUCTURA.md
+geomapnet/scripts/ESTRUCTURA.md
