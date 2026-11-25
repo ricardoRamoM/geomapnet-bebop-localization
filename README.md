@@ -4,66 +4,116 @@
 
 ## Overview
 
-This repository contains a Python 3 and PyTorch 2 adaptation of the original [GeoMapNet](https://github.com/NVlabs/geomapnet) implementation, developed to investigate deep learning-based visual localization for indoor drone applications.
+This repository contains a Python 3.11 and PyTorch 2.4 adaptation of the original [GeoMapNet](https://github.com/NVlabs/geomapnet) implementation, developed to investigate deep learning-based visual localization for indoor drone applications.
 
-The project focuses on adapting the original codebase to a modern software environment, integrating a custom Parrot Bebop 2 dataset, and evaluating the localization performance of MapNet using monocular image sequences.
+The project focuses on adapting sequence-based camera localization methods to a custom indoor dataset collected using a Parrot Bebop 2 drone.
 
-The work is organized into two main stages:
+The work covers three main areas:
 
-1. **Implementation and validation:** Porting the original codebase from Python 2.7 and PyTorch 0.4.1 to Python 3.11 and PyTorch 2.4, followed by training and evaluation on the 7-Scenes benchmark.
-2. **Drone adaptation:** Integrating the Parrot Bebop 2 dataset and investigating the application of sequence-based visual localization to indoor drone environments.
+1. **Codebase adaptation:** Porting the original implementation from Python 2.7 and PyTorch 0.4.1 to Python 3.11 and PyTorch 2.4, including compatibility with modern NVIDIA GPUs.
+2. **Benchmark validation:** Training and evaluating the adapted implementation on the public 7-Scenes benchmark.
+3. **Drone localization:** Preparing a custom Bebop dataset, investigating different camera pose representations, training MapNet models, and evaluating their 6-DoF localization performance.
 
-The repository includes the adapted implementation, experiment configurations, dataset preparation utilities, evaluation scripts, and selected experimental results.
+The repository includes the adapted implementation, experiment configurations, dataset preparation utilities, evaluation scripts, analysis tools, documentation, and selected experimental results.
 
 ## Main Features
 
 - Python 3.11 and PyTorch 2.4 compatibility.
-- CUDA 12.1 support.
+- CUDA 12.1 runtime support.
 - Compatibility with NVIDIA Ada architecture GPUs.
 - Adapted dataset loader for the Parrot Bebop 2.
-- Training and evaluation on the 7-Scenes dataset.
-- Custom experiment configurations for indoor drone localization.
-- Evaluation tools for trajectory visualization and quantitative pose estimation metrics.
+- Training and evaluation on the 7-Scenes benchmark.
+- Three Bebop dataset versions: v2_0, v2_2, and v2_3.
+- Support for World-to-Camera (W2C) and Camera-to-World (C2W) pose representations.
+- Configurable MapNet training experiments.
+- Learnable loss weighting parameters for absolute and relative pose losses.
+- Quantitative 6-DoF pose evaluation.
+- Trajectory visualization and per-frame error analysis.
+- Experiment comparison and automated result summarization.
 
 ## Results
 
-### 7-Scenes benchmark
+### 1. Parrot Bebop 2 Indoor Localization
 
-The adapted implementation was evaluated using the public 7-Scenes dataset.
+MapNet was evaluated on a custom indoor dataset collected using a Parrot Bebop 2 drone.
 
-The following results were obtained using MapNet trained from scratch on three scenes.
+Three dataset versions were investigated:
+
+| Version | Pose representation | Description |
+|---|---|---|
+| v2_0 | W2C training / C2W evaluation | Initial experimental configuration |
+| v2_2 | W2C | World-to-Camera pose representation |
+| v2_3 | C2W | Camera-to-World pose representation |
+
+The experiments investigate the effects of dataset preparation, pose representation, training duration, learning rate, weight decay, and other optimization parameters.
+
+#### Best experimental results
+
+The following table summarizes selected results from the training experiments.
+
+| Dataset | Selected experiment | Position mean (m) | Position RMSE (m) | Orientation mean (°) |
+|---|---|---:|---:|---:|
+| v2_0 | baseline | 0.6616 | 0.8476 | 17.4570 |
+| v2_2 (W2C) | wd1e-4_2000 | 0.3477 | 0.4151 | **8.3944** |
+| v2_3 (C2W) | 500 | **0.3322** | **0.4018** | 10.9258 |
+
+For v2_0, the reported values correspond to the common-image evaluation of the baseline experiment. For v2_2 and v2_3, the results correspond to their respective evaluations using 508 common validation images.
+
+**Best results identified:**
+
+- **Position:** v2_3, `bebop_mapnet_500`, with 0.3322 m mean error and 0.4018 m RMSE.
+- **Orientation:** v2_2, `bebop_mapnet_wd1e-4_2000`, with 8.3944° mean angular error.
+
+These results indicate substantial improvements over the initial v2_0 experiments.
+
+However, the comparison between W2C and C2W should be interpreted carefully, since dataset versions and other pipeline configurations also changed. Additional controlled experiments are necessary to isolate the effect of pose representation.
+
+#### Evaluation metrics
+
+The evaluation includes:
+
+- Mean and median translation error.
+- Translation RMSE.
+- 95th percentile translation error.
+- Mean and median orientation error.
+- 95th percentile orientation error.
+
+Translation errors are expressed in meters and orientation errors in degrees.
+
+Detailed experimental comparisons, including individual training configurations and common-image evaluations, are documented in:
+
+`docs/MAPNET_TRAINING_SUMMARY.md`
+
+### 2. 7-Scenes Benchmark
+
+The adapted implementation was also evaluated on the public [7-Scenes dataset](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/).
+
+The following results were obtained using MapNet trained from scratch:
 
 | Scene | Epochs | Median translation error | Mean translation error | Median rotation error | Mean rotation error |
 |---|---:|---:|---:|---:|---:|
-| Heads | 300 | **0.20 m** | 0.22 m | **14.23°** | 13.31° |
+| Heads | 300 | **0.20 m** | 0.22 m | 14.23° | 13.31° |
 | Chess | 100 | **0.18 m** | 0.21 m | **5.33°** | 6.61° |
-| Fire | 100 | **0.40 m** | 0.43 m | **12.15°** | 16.69° |
+| Fire | 100 | **0.40 m** | 0.43 m | 12.15° | 16.69° |
 
 The experiments used the official 7-Scenes training and test splits.
 
-### Comparison with published results
+For the Heads scene, the original MapNet paper reports median errors of 0.18 m in translation and 13.33° in rotation.
 
-For the `heads` scene, the original paper reports median errors of 0.18 m in translation and 13.33° in rotation.
+The adapted implementation achieved 0.20 m and 14.23°, respectively.
 
-The adapted implementation achieved:
+The Fire experiment was limited to 100 epochs and had not fully converged.
 
-| Metric | Original paper | Adapted implementation |
-|---|---:|---:|
-| Median translation error | 0.18 m | **0.20 m** |
-| Median rotation error | 13.33° | **14.23°** |
+## Experimental Visualizations
 
-These results indicate that the adapted implementation achieves performance close to the published MapNet results.
-
-The original public checkpoint was also evaluated independently, obtaining 0.24 m median translation error and 21.66° median rotation error. Training from scratch improved the results on this benchmark.
-
-**Note:** The `fire` experiment was limited to 100 epochs and had not fully converged. Its results should therefore be interpreted in the context of the training duration.
-
-### Experimental visualizations
-
-Selected trajectory comparisons and evaluation results are available in:
+Selected trajectory comparisons, quantitative evaluations, and experimental visualizations are available under:
 
 - `eval_results/`
 - `figures/`
+
+The Bebop evaluation results are organized by dataset version and experiment.
+
+Training checkpoints, datasets, and intermediate outputs are not distributed in this repository.
 
 ## Hardware and Software
 
@@ -74,16 +124,23 @@ The implementation was tested with the following configuration:
 | GPU | NVIDIA RTX 3500 Ada Generation Laptop GPU |
 | GPU memory | 12 GB |
 | Compute capability | 8.9 |
+| NVIDIA driver | 595.71.05 |
 | Operating system | Ubuntu 24.04 |
 | Python | 3.11 |
 | PyTorch | 2.4.0 |
 | torchvision | 0.19.0 |
-| CUDA runtime | 12.1 |
-| cuDNN | 9.1 |
+| NumPy | 1.26.4 |
+| SciPy | 1.17.1 |
+| Matplotlib | 3.11.2 |
+| Pillow | 13.0.0 |
+| CUDA runtime (PyTorch) | 12.1 |
+| cuDNN | 9.1.0 |
 
 The project uses Conda for environment management.
 
-Other hardware configurations may require adjustments to the CUDA and PyTorch installation.
+The tested configuration uses the PyTorch CUDA 12.1 runtime. The installed NVIDIA driver supports CUDA versions up to 13.2.
+
+A compatible NVIDIA GPU is recommended for training.
 
 ## Repository Structure
 
@@ -96,149 +153,209 @@ geomapnet-bebop-localization/
 │   ├── models/                 # PoseNet, MapNet and VidLoc models
 │   ├── scripts/                # Training and evaluation scripts
 │   ├── data/                   # Dataset statistics and metadata
-│   ├── figures/                # Original implementation figures
-│   └── README.md               # Original project documentation
+│   └── README.md               # Original implementation documentation
 │
 ├── configs/
-│   ├── 7scenes/                # 7-Scenes experiment configurations
-│   └── Bebop/                  # Bebop experiment configurations
+│   ├── 7scenes/                # 7-Scenes configurations
+│   └── Bebop/
+│       ├── v2_0/
+│       ├── v2_2/
+│       └── v2_3/
 │
 ├── src/
 │   ├── data/                   # Dataset preparation
+│   ├── analysis/               # Training experiment analysis
+│   ├── evaluation/             # Evaluation and visualization tools
 │   ├── diagnostics/            # Dataset diagnostics
-│   ├── evaluation/             # Evaluation and analysis tools
-│   └── setup/                  # Compatibility and setup utilities
+│   ├── setup/                  # Compatibility and setup utilities
+│   └── tests/                  # Validation and testing scripts
 │
-├── docs/                       # Development documentation
-├── eval_results/               # Selected experimental results
-├── figures/                    # Selected visualizations
+├── scripts/                    # Auxiliary utilities
 │
-├── environment_mapnet.yml      # Conda environment
+├── docs/                       # Technical and experimental documentation
+│   └── MAPNET_TRAINING_SUMMARY.md
+│
+├── eval_results/                # Selected evaluation results
+├── figures/                     # Selected visualizations
+│
+├── environment_mapnet.yml
 ├── .gitignore
 └── README.md
 ```
 
-Datasets, training checkpoints, temporary logs, and intermediate outputs are not included in this repository.
-
 ## Installation
 
-### 1. Clone the repository
+### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/geomapnet-bebop-localization.git
+git clone https://github.com/ricardoRamoM/geomapnet-bebop-localization.git
 cd geomapnet-bebop-localization
 ```
 
-### 2. Create the Conda environment
+### 2. Create the Conda Environment
 
 ```bash
 conda env create -f environment_mapnet.yml
 conda activate mapnet-py311
 ```
 
-### 3. Install additional dependencies
+### 3. Install Additional Dependencies
 
-Visdom requires a compatible setuptools version.
+Visdom requires a compatible setuptools version and is installed separately:
 
 ```bash
 pip install "setuptools<80"
 pip install --no-build-isolation visdom
 ```
 
-### 4. Verify the installation
+### 4. Verify the Installation
 
 ```bash
-python - <<'PY'
-import torch
-import torchvision
-
-print("PyTorch:", torch.__version__)
-print("Torchvision:", torchvision.__version__)
-print("CUDA available:", torch.cuda.is_available())
-
-if torch.cuda.is_available():
-    print("GPU:", torch.cuda.get_device_name(0))
-    print("Capability:", torch.cuda.get_device_capability(0))
-PY
+python -c "import torch; import torchvision; print('PyTorch:', torch.__version__); print('Torchvision:', torchvision.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA runtime:', torch.version.cuda)"
 ```
-
-The tested configuration uses PyTorch 2.4.0, torchvision 0.19.0, and CUDA 12.1.
 
 ## Datasets
 
 ### 7-Scenes
 
-The public [7-Scenes dataset](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/) is used to validate the implementation.
+The public [7-Scenes dataset](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/) is used to validate the adapted implementation.
 
 Dataset files must be downloaded separately.
 
-The dataset directory should be connected to the expected path:
+The expected dataset directory is:
 
 ```text
 geomapnet/data/deepslam_data/7Scenes/
 ```
 
-The scene-specific metadata required by the original implementation is maintained separately under:
+Scene-specific metadata is maintained under:
 
 ```text
 geomapnet/data/7Scenes/
 ```
 
-In particular, `pose_stats.txt` and `stats.txt` must match the experimental setup.
+In particular, `pose_stats.txt` and `stats.txt` must correspond to the experimental setup.
 
 ### Parrot Bebop 2
 
-A custom indoor dataset collected with a Parrot Bebop 2 drone is used for the drone localization experiments.
+A custom indoor dataset collected using a Parrot Bebop 2 drone is used for the localization experiments.
 
 The dataset contains image sequences and associated camera pose annotations.
 
-The dataset files are not distributed in this repository. Users must prepare the data locally and configure the corresponding paths and experiment settings.
+Three dataset versions are currently investigated:
 
-See `docs/` and `configs/Bebop/` for the available dataset preparation notes and experiment configurations.
+- `v2_0`
+- `v2_2`
+- `v2_3`
+
+The dataset files are not distributed in this repository. Users must prepare the data locally and configure the corresponding dataset paths and experiment settings.
+
+Refer to `docs/` and `configs/Bebop/` for additional information.
 
 ## Training and Evaluation
 
-The original training and evaluation entry points are maintained in:
+The main training and evaluation entry points are located in:
 
 ```text
 geomapnet/scripts/
 ```
 
-Experiment-specific configurations are maintained in:
+Experiment-specific configurations are maintained under:
 
 ```text
 configs/
 ```
 
-For 7-Scenes experiments, the original training and evaluation scripts can be used with the corresponding scene and configuration.
+### Training
 
-The general training workflow is:
+A Bebop experiment can be launched using:
 
-```text
-Dataset preparation
-        ↓
-Dataset loading
-        ↓
-Model training
-        ↓
-Checkpoint generation
-        ↓
-Model evaluation
-        ↓
-Trajectory visualization and metrics
+```bash
+python geomapnet/scripts/train.py \
+    --dataset Bebop \
+    --scene v2_3 \
+    --config_file configs/Bebop/v2_3/bebop_mapnet_500.ini \
+    --model mapnet \
+    --device 0 \
+    --learn_beta \
+    --learn_gamma
 ```
 
-Refer to the original implementation documentation and the experiment notes in `docs/` for detailed commands and configuration parameters.
+The configuration filename must correspond to an existing experiment configuration.
+
+The `--learn_beta` and `--learn_gamma` options enable learnable weighting parameters for the absolute pose and relative motion losses, respectively.
+
+### Evaluation
+
+An example evaluation command is:
+
+```bash
+python geomapnet/scripts/eval.py \
+    --dataset Bebop \
+    --scene v2_3 \
+    --model mapnet \
+    --weights experiments/Bebop/v2_3/bebop_mapnet_500/best_model.pth.tar \
+    --config_file configs/Bebop/v2_3/bebop_mapnet_500.ini \
+    --val \
+    --eval_name bebop_mapnet_500
+```
+
+### Experiment Analysis
+
+The repository includes an analysis utility to compare multiple training runs automatically.
+
+For v2_0:
+
+```bash
+python src/analysis/analyze_mapnet_runs.py \
+    --dataset Bebop \
+    --scene v2_0
+```
+
+For v2_2:
+
+```bash
+python src/analysis/analyze_mapnet_runs.py \
+    --dataset Bebop \
+    --scene v2_2
+```
+
+For v2_3:
+
+```bash
+python src/analysis/analyze_mapnet_runs.py \
+    --dataset Bebop \
+    --scene v2_3
+```
+
+The analysis tool collects available training and evaluation artifacts, compares experimental configurations, and generates quantitative summaries.
 
 ## Documentation
 
-Additional documentation is available in `docs/`, including:
+Additional documentation is available under `docs/`, including:
 
 - Python 3 and PyTorch compatibility modifications.
 - Dataset adaptation and preparation.
-- Coordinate and pose handling.
+- Coordinate systems and pose representations.
+- W2C and C2W transformations.
 - 7-Scenes training experiments.
-- Evaluation procedures and experimental analysis.
+- Bebop dataset preparation.
+- Training configurations and experimental comparisons.
+- Evaluation procedures and results.
+
+The detailed comparison of Bebop training experiments is available in:
+
+`docs/MAPNET_TRAINING_SUMMARY.md`
+
+## Limitations
+
+- The custom Parrot Bebop 2 dataset is not publicly distributed with this repository.
+- Training checkpoints and intermediate experiment outputs are not included.
+- Reproducing the reported results requires the corresponding datasets, configurations, and compatible software environment.
+- The reported results correspond to specific training and evaluation configurations.
+- Comparisons between dataset versions must account for changes in dataset preparation and pose representation.
+- The reported performance does not represent a fully optimized or deployed real-time localization system.
+- Performance may vary depending on hardware, dataset preparation, and training configuration.
 
 ## Acknowledgments
 
@@ -250,13 +367,15 @@ Brahmbhatt, S., Gu, J., Kim, K., Hays, J., and Kautz, J. (2018). *Geometry-Aware
 
 Original repository: https://github.com/NVlabs/geomapnet
 
-All original authorship, attribution, and licensing requirements are retained.
+All original authorship, attribution, and applicable licensing requirements are retained.
 
 ## License
 
 The original GeoMapNet code is distributed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
 
-This repository retains the original licensing terms for the adapted code. Refer to `geomapnet/LICENSE.md` and the accompanying license information for details.
+Refer to `geomapnet/LICENSE.md` for the original license and its terms.
+
+The licensing conditions applicable to adapted portions must be considered in accordance with the original license. Other contributions and materials should be interpreted according to their respective authorship and licensing terms.
 
 ## Author
 

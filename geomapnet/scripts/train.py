@@ -22,6 +22,19 @@ import torch
 from torch import nn
 from torchvision import transforms, models
 from torchvision.models import ResNet34_Weights
+from pathlib import Path
+
+# ============================================================
+# Repository paths
+# ============================================================
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+GEOMAPNET_DIR = SCRIPT_DIR.parent
+REPO_ROOT = GEOMAPNET_DIR.parent
+
+CONFIG_DIR = REPO_ROOT / 'configs'
+DATA_DIR = GEOMAPNET_DIR / 'data'
+DEEPSLAM_DATA_DIR = DATA_DIR / 'deepslam_data'
 
 parser = argparse.ArgumentParser(description='Training script for PoseNet and'
                                              'MapNet variants')
@@ -51,9 +64,32 @@ if args.dataset == 'Bebop' and args.model != 'mapnet':
     'Por ahora, Bebop solamente está integrado con --model mapnet.'
   )
 
+# ============================================================
+# Configuration
+# ============================================================
+
 settings = configparser.ConfigParser()
-with open(args.config_file, 'r') as f:
+
+config_path = Path(args.config_file)
+
+if not config_path.is_absolute():
+  if config_path.parts[0] == 'configs':
+    config_path = REPO_ROOT / config_path
+  else:
+    config_path = CONFIG_DIR / config_path
+
+config_path = config_path.resolve()
+
+if not config_path.is_file():
+  raise FileNotFoundError(
+    f'Configuration file not found: {config_path}'
+  )
+
+with open(config_path, 'r') as f:
   settings.read_string(f.read())
+
+print(f'Using configuration: {config_path}')
+
 section = settings['optimization']
 optim_config = {k: json.loads(v) for k,v in section.items() if k != 'opt'}
 opt_method = section['opt']
@@ -118,26 +154,47 @@ if args.learn_gamma and hasattr(train_criterion, 'srx') and \
 optimizer = Optimizer(params=param_list, method=opt_method, base_lr=lr,
   weight_decay=weight_decay, **optim_config)
 
+# ============================================================
 # Dataset statistics
-if args.dataset == 'Bebop':
-  stats_file = osp.join(
-    '..', 'data', 'deepslam_data',
-    'Bebop', args.scene, 'stats.txt'
-  )
-else:
-  data_dir = osp.join('..', 'data', args.dataset)
-  stats_file = osp.join(data_dir, args.scene, 'stats.txt')
+# ============================================================
 
-if not osp.isfile(stats_file):
-  raise FileNotFoundError(
-    'No se encontró stats.txt: {}'.format(stats_file)
+if args.dataset == 'Bebop':
+  # La ubicación definitiva de las estadísticas de Bebop
+  # se establecerá después de verificar su estructura real.
+  stats_candidates = [
+    DATA_DIR / 'Bebop' / args.scene / 'stats.txt',
+    DATA_DIR / 'Bebop' / 'bebop' / args.scene / 'stats.txt',
+    DEEPSLAM_DATA_DIR / 'Bebop' / args.scene / 'stats.txt',
+    DEEPSLAM_DATA_DIR / 'Bebop' / 'bebop' / args.scene / 'stats.txt',
+  ]
+
+  stats_file = next(
+    (path for path in stats_candidates if path.is_file()),
+    None
   )
+
+  if stats_file is None:
+    raise FileNotFoundError(
+      'Could not find Bebop stats.txt.\n'
+      'Checked the following locations:\n' +
+      '\n'.join(str(p) for p in stats_candidates)
+    )
+
+else:
+  stats_file = DATA_DIR / args.dataset / args.scene / 'stats.txt'
+
+  if not stats_file.is_file():
+    raise FileNotFoundError(
+      f'Dataset statistics not found: {stats_file}'
+    )
 
 stats = np.loadtxt(stats_file)
 
+print(f'Using dataset statistics: {stats_file}')
+
 # Crop size (no se utiliza directamente en este script)
-data_root = osp.join('..', 'data', args.dataset)
-crop_size_file = osp.join(data_root, 'crop_size.txt')
+data_root = DATA_DIR / args.dataset
+crop_size_file = data_root / 'crop_size.txt'
 
 if osp.isfile(crop_size_file):
   crop_size = tuple(np.loadtxt(crop_size_file).astype(int))
@@ -158,9 +215,31 @@ data_transform = transforms.Compose(tforms)
 target_transform = transforms.Lambda(lambda x: torch.from_numpy(x).float())
 
 # datasets
-data_dir = osp.join('..', 'data', 'deepslam_data', args.dataset)
-kwargs = dict(scene=args.scene, data_path=data_dir, transform=data_transform,
-  target_transform=target_transform, seed=seed)
+# ============================================================
+# Dataset loading
+# ============================================================
+
+# Dataset directory
+if args.dataset == 'Bebop':
+  data_dir = DEEPSLAM_DATA_DIR / 'Bebop' / 'bebop'
+else:
+  data_dir = DEEPSLAM_DATA_DIR / args.dataset
+
+if not data_dir.is_dir():
+  raise FileNotFoundError(
+    f'Dataset directory not found: {data_dir}'
+  )
+
+kwargs = dict(
+  scene=args.scene,
+  data_path=str(data_dir),
+  transform=data_transform,
+  target_transform=target_transform,
+  seed=seed
+)
+
+print(f'Using dataset directory: {data_dir}')
+
 if args.model == 'posenet':
   if args.dataset == '7Scenes':
     from dataset_loaders.seven_scenes import SevenScenes
@@ -185,18 +264,27 @@ else:
   raise NotImplementedError
 
 # trainer
-config_name = args.config_file.split('/')[-1]
-config_name = config_name.split('.')[0]
-experiment_name = '{:s}_{:s}_{:s}_{:s}'.format(args.dataset, args.scene,
-  args.model, config_name)
-if args.learn_beta:
-  experiment_name = '{:s}_learn_beta'.format(experiment_name)
-if args.learn_gamma:
-  experiment_name = '{:s}_learn_gamma'.format(experiment_name)
+config_name = config_path.stem
+experiment_name = '{:s}'.format(config_name)
 experiment_name += args.suffix
-trainer = Trainer(model, optimizer, train_criterion, args.config_file,
+# Build experiment output directory
+dataset_folder = '7scenes' if args.dataset == '7Scenes' else args.dataset
+
+experiment_dir = (
+    REPO_ROOT
+    / 'experiments'
+    / dataset_folder
+    / args.scene
+    / experiment_name
+)
+
+experiment_dir.mkdir(parents=True, exist_ok=True)
+
+print('Experiment output directory:', experiment_dir)
+trainer = Trainer(model, optimizer, train_criterion, str(config_path),
                   experiment_name, train_set, val_set, device=args.device,
                   checkpoint_file=args.checkpoint,
-                  resume_optim=args.resume_optim, val_criterion=val_criterion)
+                  resume_optim=args.resume_optim, val_criterion=val_criterion,
+                  output_dir=str(experiment_dir))
 lstm = args.model == 'vidloc'
 trainer.train_val(lstm=lstm)

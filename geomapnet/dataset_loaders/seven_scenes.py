@@ -13,6 +13,7 @@ from torch.utils import data
 from dataset_loaders.utils import load_image
 import sys
 import pickle
+from pathlib import Path
 
 sys.path.insert(0, '../')
 from common.pose_utils import process_poses
@@ -40,9 +41,19 @@ class SevenScenes(data.Dataset):
       self.skip_images = skip_images
       np.random.seed(seed)
 
-      # directories
+      # Directories: resolve dataset statistics independently of the
+      # current working directory.
       base_dir = osp.join(osp.expanduser(data_path), scene)
-      data_dir = osp.join('..', 'data', '7Scenes', scene)
+
+      GEOMAPNET_DIR = Path(__file__).resolve().parents[1]
+      data_dir = str(GEOMAPNET_DIR / 'data' / '7Scenes' / scene)
+
+      if not osp.isdir(base_dir):
+          raise FileNotFoundError(
+              "No se encontró el directorio de datos 7Scenes: {}".format(base_dir)
+          )
+
+      os.makedirs(data_dir, exist_ok=True)
 
       # decide which sequences to use
       if train:

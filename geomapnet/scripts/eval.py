@@ -27,6 +27,22 @@ torch.backends.cuda.matmul.allow_tf32 = False
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
 import pickle
+from pathlib import Path
+import json
+import csv
+
+from common.evaluation_metrics import (
+    compute_pose_errors,
+    summarize_errors
+)
+
+# Resolve paths independently of the current working directory.
+SCRIPT_DIR = Path(__file__).resolve().parent
+GEOMAPNET_DIR = SCRIPT_DIR.parent
+REPO_ROOT = GEOMAPNET_DIR.parent
+
+DATA_DIR = GEOMAPNET_DIR / 'data'
+DEEPSLAM_DATA_DIR = DATA_DIR / 'deepslam_data'
 
 # config
 parser = argparse.ArgumentParser(description='Evaluation script for PoseNet and'
@@ -36,18 +52,34 @@ parser.add_argument('--dataset', type=str,
                     help='Dataset')
 parser.add_argument('--scene', type=str, help='Scene name')
 parser.add_argument('--weights', type=str, help='trained weights to load')
-parser.add_argument('--model', choices=('posenet', 'mapnet', 'mapnet++'),
+parser.add_argument('--model', type=str,
+  choices=('posenet', 'mapnet', 'mapnet++'), required=True,
   help='Model to use (mapnet includes both MapNet and MapNet++ since their'
        'evluation process is the same and they only differ in the input weights'
        'file')
 parser.add_argument('--device', type=str, default='0', help='GPU device(s)')
 parser.add_argument('--config_file', type=str, help='configuration file')
 parser.add_argument('--val', action='store_true', help='Plot graph for val')
-parser.add_argument('--output_dir', type=str, default=None,
-  help='Output image directory')
+parser.add_argument(
+  '--output_dir',
+  type=str,
+  default=None,
+  help='Output directory for evaluation results. '
+       'If omitted, results are saved under eval_results/<dataset>/<scene>/'
+)
+parser.add_argument(
+    '--eval_name',
+    type=str,
+    default=None,
+    help='Custom name for the evaluation output directory. '
+         'Defaults to the checkpoint filename.'
+)
 parser.add_argument('--pose_graph', action='store_true',
   help='Turn on Pose Graph Optimization')
 args = parser.parse_args()
+
+
+
 if 'CUDA_VISIBLE_DEVICES' not in os.environ:
   os.environ['CUDA_VISIBLE_DEVICES'] = args.device
 
@@ -94,16 +126,36 @@ else:
   print('Could not load weights from {:s}'.format(weights_filename))
   sys.exit(-1)
 
-# Dataset statistics: use the same location as scripts/train.py.
+# Dataset directory
 if args.dataset == 'Bebop':
-  data_dir = osp.join(
-    '..', 'data', 'deepslam_data', args.dataset
-  )
+  data_dir = DEEPSLAM_DATA_DIR / 'Bebop' / 'bebop'
 else:
-  data_dir = osp.join('..', 'data', args.dataset)
+  data_dir = DEEPSLAM_DATA_DIR / args.dataset
 
-stats_filename = osp.join(data_dir, args.scene, 'stats.txt')
+if not data_dir.is_dir():
+  raise FileNotFoundError(
+      'Dataset directory not found: {}'.format(data_dir)
+  )
+
+print('Using dataset directory:', data_dir)
+
+# Dataset statistics
+# 7Scenes stores statistics separately from the original image dataset.
+if args.dataset == '7Scenes':
+  stats_dir = DATA_DIR / '7Scenes' / args.scene
+else:
+  stats_dir = data_dir / args.scene
+
+stats_filename = stats_dir / 'stats.txt'
+
+if not stats_filename.is_file():
+  raise FileNotFoundError(
+      'Dataset statistics not found: {}'.format(stats_filename)
+  )
+
 stats = np.loadtxt(stats_filename)
+
+print('Using dataset statistics:', stats_filename)
 
 # transformer
 data_transform = transforms.Compose([
@@ -112,9 +164,17 @@ data_transform = transforms.Compose([
   transforms.Normalize(mean=stats[0], std=np.sqrt(stats[1]))])
 target_transform = transforms.Lambda(lambda x: torch.from_numpy(x).float())
 
-# read mean and stdev for un-normalizing predictions
-pose_stats_file = osp.join(data_dir, args.scene, 'pose_stats.txt')
+# Read mean and standard deviation for un-normalizing predictions
+pose_stats_file = stats_dir / 'pose_stats.txt'
+
+if not pose_stats_file.is_file():
+  raise FileNotFoundError(
+      'Pose statistics not found: {}'.format(pose_stats_file)
+  )
+
 pose_m, pose_s = np.loadtxt(pose_stats_file)  # mean and stdev
+
+print('Using pose statistics:', pose_stats_file)
 
 # dataset
 train = not args.val
@@ -122,7 +182,7 @@ if train:
   print('Running {:s} on TRAIN data'.format(args.model))
 else:
   print('Running {:s} on VAL data'.format(args.model))
-data_dir = osp.join('..', 'data', 'deepslam_data', args.dataset)
+
 kwargs = dict(scene=args.scene, data_path=data_dir, train=train,
   transform=data_transform, target_transform=target_transform, seed=seed)
 if (args.model.find('mapnet') >= 0) or args.pose_graph:
@@ -212,20 +272,20 @@ for batch_idx, (data, target) in enumerate(loader):
 
 # calculate losses
 # Calculate losses only for images that were actually evaluated
+# -------------------------------------------------------------------------
+# Calculate evaluation errors
+# -------------------------------------------------------------------------
+
 valid_indices = np.asarray(valid_indices, dtype=int)
 
 pred_eval = pred_poses[valid_indices]
 targ_eval = targ_poses[valid_indices]
 
-t_loss = np.asarray([
-    t_criterion(p, t)
-    for p, t in zip(pred_eval[:, :3], targ_eval[:, :3])
-])
+# Single source of truth for translation and orientation errors.
+t_loss, q_loss = compute_pose_errors(pred_eval, targ_eval)
 
-q_loss = np.asarray([
-    q_criterion(p, t)
-    for p, t in zip(pred_eval[:, 3:], targ_eval[:, 3:])
-])
+# Summary statistics.
+metrics = summarize_errors(t_loss, q_loss)
 
 print('Evaluated images: {:d} / {:d}'.format(
     len(valid_indices), L
@@ -234,10 +294,10 @@ print('Evaluated images: {:d} / {:d}'.format(
 print(
     'Error in translation: median {:3.2f} m, mean {:3.2f} m\n'
     'Error in rotation: median {:3.2f} degrees, mean {:3.2f} degrees'.format(
-        np.median(t_loss),
-        np.mean(t_loss),
-        np.median(q_loss),
-        np.mean(q_loss)
+        metrics['position']['median_m'],
+        metrics['position']['mean_m'],
+        metrics['orientation']['median_deg'],
+        metrics['orientation']['mean_deg']
     )
 )
 
@@ -249,65 +309,193 @@ print(
 #      '{:s} error in rotation    = {:3.2f} degrees'.format(eval_str, t_loss,
 
 
-# create figure object
+# -------------------------------------------------------------------------
+# Create 3D trajectory visualization
+# Original NVIDIA MapNet visualization, extended to Bebop.
+# -------------------------------------------------------------------------
+
 fig = plt.figure()
-if args.dataset != '7Scenes':
-  ax = fig.add_subplot(111)
-else:
-  ax = fig.add_subplot(111, projection='3d')
+ax = fig.add_subplot(111, projection='3d')
+
 plt.subplots_adjust(left=0, bottom=0, right=1, top=1)
 
-# plot on the figure object
+# Reduce the number of plotted points for large datasets.
 ss = max(1, int(len(valid_indices) / 1000))
 
-# Plot only images that were actually evaluated
+# Predicted and ground-truth positions.
 x = np.vstack((
-    pred_eval[::ss, 0].T,
-    targ_eval[::ss, 0].T
+    pred_eval[::ss, 0],
+    targ_eval[::ss, 0]
 ))
 
 y = np.vstack((
-    pred_eval[::ss, 1].T,
-    targ_eval[::ss, 1].T
+    pred_eval[::ss, 1],
+    targ_eval[::ss, 1]
 ))
 
+z = np.vstack((
+    pred_eval[::ss, 2],
+    targ_eval[::ss, 2]
+))
 
-if args.dataset != '7Scenes':  # 2D drawing
-  ax.plot(x, y, c='b')
-  ax.scatter(x[0, :], y[0, :], c='r')
-  ax.scatter(x[1, :], y[1, :], c='g')
+# Draw blue lines connecting each prediction to its ground truth.
+for xx, yy, zz in zip(x.T, y.T, z.T):
+    ax.plot(
+        xx,
+        yy,
+        zs=zz,
+        c='b'
+    )
+
+# Predicted positions (red).
+ax.scatter(
+    x[0, :],
+    y[0, :],
+    zs=z[0, :],
+    c='r',
+    depthshade=0
+)
+
+# Ground-truth positions (green).
+ax.scatter(
+    x[1, :],
+    y[1, :],
+    zs=z[1, :],
+    c='g',
+    depthshade=0
+)
+
+# Original NVIDIA viewing angle.
+ax.view_init(azim=119, elev=13)
+
+
+
+# -------------------------------------------------------------------------
+# Save evaluation results
+# -------------------------------------------------------------------------
+
+# Determine evaluation name from the checkpoint filename.
+if args.eval_name is not None:
+    eval_name = args.eval_name
 else:
-  z = np.vstack((
-    pred_eval[::ss, 2].T,
-    targ_eval[::ss, 2].T
-  ))
-  for xx, yy, zz in zip(x.T, y.T, z.T):
-    ax.plot(xx, yy, zs=zz, c='b')
-  ax.scatter(x[0, :], y[0, :], zs=z[0, :], c='r', depthshade=0)
-  ax.scatter(x[1, :], y[1, :], zs=z[1, :], c='g', depthshade=0)
-  ax.view_init(azim=119, elev=13)
+    checkpoint_name = Path(args.weights).name
 
-if DISPLAY:
-  plt.show(block=True)
+    # Remove common checkpoint extensions.
+    for extension in ('.pth.tar', '.pt.tar', '.pth', '.pt'):
+        if checkpoint_name.endswith(extension):
+            checkpoint_name = checkpoint_name[:-len(extension)]
+            break
 
-if args.output_dir is not None:
-  model_name = args.model
-  if args.weights.find('++') >= 0:
+    eval_name = checkpoint_name
+
+# Dataset folder naming.
+dataset_folder = '7scenes' if args.dataset == '7Scenes' else args.dataset
+
+# Default output directory:
+# eval_results/<dataset>/<scene>/<evaluation_name>/
+if args.output_dir is None:
+    output_dir = (
+        REPO_ROOT
+        / 'eval_results'
+        / dataset_folder
+        / args.scene
+        / eval_name
+    )
+else:
+    output_dir = Path(args.output_dir).expanduser().resolve()
+
+# Create output directory if it does not exist.
+output_dir.mkdir(parents=True, exist_ok=True)
+print('Evaluation output directory:', output_dir)
+
+# Generate result filenames.
+model_name = args.model
+
+if args.weights.find('++') >= 0:
     model_name += '++'
-  if args.pose_graph:
+
+if args.pose_graph:
     model_name += '_pgo_{:s}'.format(vo_lib)
-  experiment_name = '{:s}_{:s}_{:s}'.format(args.dataset, args.scene, model_name)
-  image_filename = osp.join(osp.expanduser(args.output_dir),
-    '{:s}.png'.format(experiment_name))
-  fig.savefig(image_filename)
-  print('{:s} saved'.format(image_filename))
-  result_filename = osp.join(osp.expanduser(args.output_dir), '{:s}.pkl'.
-    format(experiment_name))
-  with open(result_filename, 'wb') as f:
-    pickle.dump({
-      'targ_poses': targ_eval,
-      'pred_poses': pred_eval,
-      'valid_indices': valid_indices
-    }, f)
-  
-  print('{:s} written'.format(result_filename))
+
+experiment_name = '{:s}_{:s}_{:s}'.format(
+    args.dataset,
+    args.scene,
+    model_name
+)
+
+image_filename = output_dir / '{:s}.png'.format(experiment_name)
+result_filename = output_dir / '{:s}.pkl'.format(experiment_name)
+
+# Save figure.
+fig.savefig(str(image_filename))
+print('{} saved'.format(image_filename))
+
+# Save predictions and ground truth.
+with open(result_filename, 'wb') as f:
+    pickle.dump(
+        {
+            'targ_poses': targ_eval,
+            'pred_poses': pred_eval,
+            'valid_indices': valid_indices
+        },
+        f
+    )
+
+print('{} written'.format(result_filename))
+
+# -------------------------------------------------------------------------
+# Save evaluation metrics
+# -------------------------------------------------------------------------
+
+# Evaluation metadata.
+metrics['metadata'] = {
+    'dataset': args.dataset,
+    'scene': args.scene,
+    'model': args.model,
+    'checkpoint': str(Path(args.weights).expanduser().resolve()),
+    'checkpoint_name': Path(args.weights).name,
+    'split': 'val' if args.val else 'train',
+    'pose_graph': bool(args.pose_graph),
+    'num_dataset_images': int(L),
+}
+
+# Save summary metrics.
+metrics_filename = output_dir / 'metrics.json'
+
+with open(metrics_filename, 'w', encoding='utf-8') as f:
+    json.dump(metrics, f, indent=4, ensure_ascii=False)
+
+print('{} written'.format(metrics_filename))
+
+
+# Save per-image errors.
+errors_filename = output_dir / 'per_image_errors.csv'
+
+with open(errors_filename, 'w', newline='', encoding='utf-8') as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=[
+            'valid_index',
+            'translation_error_m',
+            'orientation_error_deg'
+        ]
+    )
+
+    writer.writeheader()
+
+    for idx, translation_error, orientation_error in zip(
+        valid_indices,
+        t_loss,
+        q_loss
+    ):
+        writer.writerow({
+            'valid_index': int(idx),
+            'translation_error_m': float(translation_error),
+            'orientation_error_deg': float(orientation_error)
+        })
+
+print('{} written'.format(errors_filename))
+
+# Display interactive Matplotlib window after saving the results.
+if DISPLAY:
+    plt.show(block=True)

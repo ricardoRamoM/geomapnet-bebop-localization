@@ -63,7 +63,7 @@ def safe_collate(batch):
 class Trainer(object):
   def __init__(self, model, optimizer, train_criterion, config_file, experiment,
       train_dataset, val_dataset, device, checkpoint_file=None,
-      resume_optim=False, val_criterion=None):
+      resume_optim=False, val_criterion=None, output_dir=None):
     """
     General purpose training script
     :param model: Network model
@@ -78,6 +78,7 @@ class Trainer(object):
     :param checkpoint_file: Name of file with saved weights and optim params
     :param resume_optim: whether to resume optimization
     :param val_criterion: loss function to be used for validation
+    :param output_dir: Directory where logs and checkpoints will be saved
     """
     self.model = model
     self.train_criterion = train_criterion
@@ -115,9 +116,12 @@ class Trainer(object):
     self.config['log_visdom'] = section.getboolean('visdom')
     self.config['print_freq'] = section.getint('print_freq')
 
-    self.logdir = osp.join(os.getcwd(), 'logs', self.experiment)
-    if not osp.isdir(self.logdir):
-      os.makedirs(self.logdir)
+    # Experiment output directory
+    if output_dir is None:
+      output_dir = osp.join(os.getcwd(), 'logs', self.experiment)
+
+    self.logdir = osp.abspath(output_dir)
+    os.makedirs(self.logdir, exist_ok=True)
 
     if self.config['log_visdom']:
       # start plots

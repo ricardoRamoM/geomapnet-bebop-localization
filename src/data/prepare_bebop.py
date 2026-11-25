@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # prepare_bebop.py
 """ 
-python src/data/prepare_bebop.py --version v2_2
+python src/data/prepare_bebop.py --version v2_3
 
 Prepara el dataset Parrot Bebop 2 para el cargador MapNet.
 
 Entrada:
-    /data/research/mapnet/bebop_raw/
+    /data/research/bebop_raw/
         poses_split.csv
         frames_all/
         frames/
 
 Salida:
-    /data/research/mapnet/bebop_data/
+    /data/research/bebop_data/
         <secuencia>/
             <imagen>.jpg
             poses.txt
@@ -24,16 +24,16 @@ Salida:
 Formato de poses.txt:
     filename r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz
 
-Las 12 cantidades numéricas son las primeras tres filas de T_cw
-(world-to-camera), aplanadas por filas. Es exactamente el formato N x 12
-que common.pose_utils.process_poses() espera.
+Las 12 cantidades numéricas son las primeras tres filas de T_c2w
+(camera-to-world), aplanadas por filas.
 
-Convenciones de entrada:
-- posición C_w: centro de cámara expresado en mundo FLU, en metros.
-- cuaternión qx,qy,qz,qw: orientación body-to-world.
+Convenciones:
+- Posición C_w: centro de cámara expresado en mundo FLU, en metros.
+- Cuaternión qx,qy,qz,qw: orientación body-to-world.
 - R_BODY_FROM_CAMERA: transforma vectores de cámara óptica
   [right, down, forward] a cuerpo FLU [forward, left, up].
 
+El archivo poses.txt contiene exclusivamente poses C2W.
 No se recalcula COLMAP->FLU. El CSV debe estar ya alineado en FLU.
 """
 
@@ -55,8 +55,12 @@ import argparse
 # CONFIGURACIÓN
 # ---------------------------------------------------------------------------
 
-RAW_ROOT_BASE = Path("/data/research/bebeop_raw")
-OUT_ROOT_BASE = Path("/data/research/bebop_data")
+#RAW_ROOT_BASE = Path("/data/research/bebop_raw")
+#OUT_ROOT_BASE = Path("/data/research/bebop_data")
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+RAW_ROOT_BASE = PROJECT_ROOT / "bebop_raw"
+OUT_ROOT_BASE = PROJECT_ROOT / "bebop_data"
 
 
 # Se asignan en main() según --version.
@@ -99,6 +103,28 @@ SEQUENCES_BY_VERSION = {
 
         "ref": None,
     },
+
+    "v2_3": {
+            "bebop_001_val": "test",
+            "bebop_002_train": "train",
+            "bebop_003_train": "train",
+            "bebop_004_train": "train",
+            "bebop_005_train": "train",
+    
+            "bebop_test_001": "train",
+            "bebop_test_002": "train",
+            "bebop_test_003": "train",
+            "bebop_test_004": "test",
+            "bebop_test_005": "train",
+            "bebop_test_006": "train",
+            "bebop_test_007": "train",
+            "bebop_test_008": "test",
+            "bebop_test_009": "train",
+            "bebop_test_010": "test",
+            "bebop_test_011": "train",
+    
+            "ref": None,
+        },
 }
 
 # Convierte cámara óptica [right, down, forward] a cuerpo FLU
@@ -192,19 +218,6 @@ def make_camera_to_world_pose(pose: dict) -> np.ndarray:
         raise ValueError(f"Determinante CTW inválido para {pose['image_name']}")
 
     return T_wc
-
-
-def make_world_to_camera_pose(pose: dict) -> np.ndarray:
-    """
-    Construye T_cw (world-to-camera) como la inversa de T_wc.
-
-    R_cw = R_wc.T
-    t_cw = -R_cw C_w
-    """
-    T_wc = make_camera_to_world_pose(pose)
-    T_cw = np.linalg.inv(T_wc)
-
-    return T_cw
 
 
 def read_pose_csv(path: Path) -> dict[str, dict]:
@@ -320,46 +333,58 @@ def prepare_sequences(poses: dict[str, dict]):
     train_sequences = []
     test_sequences = []
     output_images: dict[str, list[Path]] = {}
-    all_w2c: dict[str, list[np.ndarray]] = {}
-    all_ctw: dict[str, list[np.ndarray]] = {}
+    all_c2w: dict[str, list[np.ndarray]] = {}
 
     for sequence, split in SEQUENCES.items():
         rows = sorted(grouped.get(sequence, []), key=sort_key)
+
+        # Las secuencias de referencia son opcionales.
+        if not rows and split is None:
+            print(f"[{sequence:16s}] omitida: no contiene poses.")
+            continue
+
         if not rows:
-            raise RuntimeError(f"No hay poses para la secuencia {sequence!r}.")
+            raise RuntimeError(
+                f"No hay poses para la secuencia {sequence!r}."
+            )
 
         destination_dir = OUT_ROOT / sequence
         destination_dir.mkdir(parents=True, exist_ok=True)
 
+        # Elimina el archivo antiguo para evitar confundirlo con el nuevo
+        # formato C2W.
+        legacy_pose_file = destination_dir / "poses_CTW.txt"
+        if legacy_pose_file.exists():
+            legacy_pose_file.unlink()
+
         image_paths = []
-        w2c_matrices = []
-        ctw_matrices = []
-        
-        poses_path_wtc = destination_dir / "poses.txt"
-        poses_path_ctw = destination_dir / "poses_CTW.txt"
+        c2w_matrices = []
 
-        with (
-            poses_path_wtc.open("w", encoding="utf-8") as pose_file_wtc,
-            poses_path_ctw.open("w", encoding="utf-8") as pose_file_ctw,
-        ):
-            pose_file_wtc.write(
-                "# WTC: filename r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz\n"
-            )
-            pose_file_ctw.write(
-                "# CTW: filename r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz\n"
-            )
+        poses_path = destination_dir / "poses.txt"
 
+        with poses_path.open("w", encoding="utf-8") as pose_file:
+            pose_file.write(
+                "# C2W: filename "
+                "r11 r12 r13 tx "
+                "r21 r22 r23 ty "
+                "r31 r32 r33 tz\n"
+            )
 
             for pose in rows:
                 image_name = pose["image_name"]
+
                 source = find_source_image(
-                    image_name, pose["video_name"], sequence
+                    image_name,
+                    pose["video_name"],
+                    sequence,
                 )
+
                 destination = destination_dir / image_name
 
                 if destination.is_symlink() or destination.exists():
                     if not REUSE_EXISTING_IMAGES:
                         destination.unlink()
+
                         if USE_SYMLINK:
                             destination.symlink_to(source.resolve())
                         else:
@@ -378,42 +403,30 @@ def prepare_sequences(poses: dict[str, dict]):
                         f"Imagen corrupta o ilegible: {destination}"
                     ) from exc
 
-                # T_wc = camera-to-world (CTW),  T_cw = world-to-camera (WTC)                
-                T_wc = make_camera_to_world_pose(pose)
-                T_cw = np.linalg.inv(T_wc)
+                # Única representación de pose: camera-to-world.
+                T_c2w = make_camera_to_world_pose(pose)
+                matrix_c2w = T_c2w[:3, :4]
 
-                matrix_wtc = T_cw[:3, :4] # 3x4
-                matrix_ctw = T_wc[:3, :4] # 3x4
+                values = matrix_c2w.reshape(-1)
 
-                values_wtc = matrix_wtc.reshape(-1)
-                values_ctw = matrix_ctw.reshape(-1)
-
-                pose_file_wtc.write(
-                    image_name + " " +
-                    " ".join(f"{value:.12f}" for value in values_wtc) + "\n"
+                pose_file.write(
+                    image_name + " "
+                    + " ".join(f"{value:.12f}" for value in values)
+                    + "\n"
                 )
 
-                pose_file_ctw.write(
-                    image_name + " " +
-                    " ".join(f"{value:.12f}" for value in values_ctw) + "\n"
-                )
-
-                # Una sola vez por imagen, en el orden del CSV/pose.
                 image_paths.append(destination)
-                w2c_matrices.append(matrix_wtc.copy())
-                ctw_matrices.append(matrix_ctw.copy())
+                c2w_matrices.append(matrix_c2w.copy())
 
         output_images[sequence] = image_paths
-        all_w2c[sequence] = w2c_matrices
-        all_ctw[sequence] = ctw_matrices
+        all_c2w[sequence] = c2w_matrices
 
         if split == "train":
             train_sequences.append(sequence)
         elif split == "test":
             test_sequences.append(sequence)
         elif split is None:
-            # La secuencia ref se prepara y conserva, pero no se
-            # incorpora a TrainSplit.txt ni a TestSplit.txt.
+            # Se prepara, pero no se incorpora a TrainSplit/TestSplit.
             pass
         else:
             raise ValueError(
@@ -421,6 +434,7 @@ def prepare_sequences(poses: dict[str, dict]):
             )
 
         split_label = split if split is not None else "excluded"
+
         print(
             f"[{sequence:16s}] split={split_label:8s} | "
             f"{len(image_paths):4d} imágenes"
@@ -436,8 +450,7 @@ def prepare_sequences(poses: dict[str, dict]):
         train_sequences,
         test_sequences,
         output_images,
-        all_w2c,
-        all_ctw,
+        all_c2w,
     )
 
 
@@ -500,62 +513,40 @@ def write_rgb_stats(train_sequences, test_sequences, output_images) -> None:
     print(f"Píxeles      : {pixel_count:,}")
 
 
-def write_pose_stats(train_sequences, all_w2c) -> None:
+def write_pose_stats(train_sequences, all_c2w) -> None:
     """
-    Calcula media/std de t_cw, es decir, columnas [3,7,11] de T_cw.
-    Es el mismo espacio de traslación que process_poses normaliza.
-    """
-    translations = []
-    for sequence in train_sequences:
-        for matrix_3x4 in all_w2c[sequence]:
-            translations.append(matrix_3x4[:, 3])
+    Calcula media y desviación estándar de las posiciones de cámara
+    en coordenadas mundo (C2W).
 
-    translations = np.asarray(translations, dtype=np.float64)
-    if translations.size == 0:
-        raise RuntimeError("No hay traslaciones W2C de entrenamiento.")
-
-    mean_t = translations.mean(axis=0)
-    std_t = translations.std(axis=0)
-    std_t = np.maximum(std_t, 1e-6)
-
-    with (OUT_ROOT / "pose_stats.txt").open("w", encoding="utf-8") as file:
-        file.write(" ".join(f"{v:.12f}" for v in mean_t) + "\n")
-        file.write(" ".join(f"{v:.12f}" for v in std_t) + "\n")
-
-    print(f"\nPose W2C mean_t: {mean_t}")
-    print(f"Pose W2C std_t : {std_t}")
-    print("pose_stats.txt calculado solo con secuencias TrainSplit.")
-
-
-def write_pose_stats_ctw(train_sequences, all_ctw) -> None:
-    """
-    Calcula media/std de la posición de cámara en mundo (CTW).
-    La traslación corresponde a C_w = [x, y, z] en FLU.
+    En una matriz C2W, la última columna de la matriz 3x4
+    representa C_w = [x, y, z] en el mundo FLU.
     """
     translations = []
 
     for sequence in train_sequences:
-        for matrix_3x4 in all_ctw[sequence]:
+        for matrix_3x4 in all_c2w[sequence]:
             translations.append(matrix_3x4[:, 3])
 
     translations = np.asarray(translations, dtype=np.float64)
 
     if translations.size == 0:
-        raise RuntimeError("No hay traslaciones CTW de entrenamiento.")
+        raise RuntimeError(
+            "No hay posiciones C2W de las secuencias de entrenamiento."
+        )
 
     mean_t = translations.mean(axis=0)
     std_t = translations.std(axis=0)
     std_t = np.maximum(std_t, 1e-6)
 
-    with (OUT_ROOT / "pose_stats_CTW.txt").open(
+    with (OUT_ROOT / "pose_stats.txt").open(
         "w", encoding="utf-8"
     ) as file:
         file.write(" ".join(f"{v:.12f}" for v in mean_t) + "\n")
         file.write(" ".join(f"{v:.12f}" for v in std_t) + "\n")
 
-    print(f"\nPose CTW mean_Cw: {mean_t}")
-    print(f"Pose CTW std_Cw : {std_t}")
-    print("pose_stats_CTW.txt calculado solo con secuencias TrainSplit.")
+    print(f"\nPose C2W mean_Cw: {mean_t}")
+    print(f"Pose C2W std_Cw : {std_t}")
+    print("pose_stats.txt calculado solo con secuencias TrainSplit.")
 
 
 def main() -> None:
@@ -567,7 +558,7 @@ def main() -> None:
     parser.add_argument(
         "--version",
         required=True,
-        choices=["v2_0", "v2_2"],
+        choices=["v2_0", "v2_2", "v2_3"],
         help="Versión del dataset que se desea preparar."
     )
     args = parser.parse_args()
@@ -618,14 +609,12 @@ def main() -> None:
         train_sequences,
         test_sequences,
         output_images,
-        all_w2c,
-        all_ctw,
+        all_c2w,
     ) = prepare_sequences(poses)
 
     write_split_files(train_sequences, test_sequences)
     write_rgb_stats(train_sequences, test_sequences, output_images)
-    write_pose_stats(train_sequences, all_w2c)
-    write_pose_stats_ctw(train_sequences, all_ctw)
+    write_pose_stats(train_sequences, all_c2w)
 
     train_count = sum(len(output_images[s]) for s in train_sequences)
     test_count = sum(len(output_images[s]) for s in test_sequences)

@@ -9,8 +9,9 @@ dependencies:
   - torchvision=0.19.*
   - pytorch-cuda=12.1
   - numpy=1.26.*
+  - matplotlib=3.11.*
+  - pandas=3.0.*
   - scipy
-  - matplotlib
   - pillow
   - configparser
   - pip

@@ -1,0 +1,1 @@
+experiment,checkpoint,epoch,is_best_model,split,num_images,position_mean_m,position_median_m,position_rmse_m,position_std_m,position_p95_m,orientation_mean_deg,orientation_median_deg,orientation_std_deg,orientation_p95_deg
